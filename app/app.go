@@ -498,7 +498,8 @@ func New(
 		app.GetSubspace(dualstakingmoduletypes.ModuleName),
 
 		app.BankKeeper,
-		&app.EpochstorageKeeper,
+		app.AccountKeeper,
+		app.EpochstorageKeeper,
 	)
 	dualstakingModule := dualstakingmodule.NewAppModule(appCodec, app.DualstakingKeeper, app.AccountKeeper, app.BankKeeper)
 
