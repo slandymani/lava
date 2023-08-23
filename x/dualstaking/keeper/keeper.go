@@ -18,6 +18,9 @@ type (
 		storeKey   storetypes.StoreKey
 		memKey     storetypes.StoreKey
 		paramstore paramtypes.Subspace
+
+		bankKeeper         types.BankKeeper
+		epochstorageKeeper types.EpochstorageKeeper
 	}
 )
 
@@ -27,6 +30,8 @@ func NewKeeper(
 	memKey storetypes.StoreKey,
 	ps paramtypes.Subspace,
 
+	bankKeeper types.BankKeeper,
+	epochstorageKeeper types.EpochstorageKeeper,
 ) *Keeper {
 	// set KeyTable if it has not already been set
 	if !ps.HasKeyTable() {
