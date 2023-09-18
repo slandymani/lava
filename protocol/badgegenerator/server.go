@@ -59,6 +59,7 @@ func NewServer(ipService *IpService, grpcUrl, chainId, userData string) (*Server
 	server.grpcFetcher = grpcFetch
 	server.metrics = InitMetrics()
 	return server, nil
+	//
 }
 
 func (s *Server) InitializeStateTracker(tracker *BadgeStateTracker) {
