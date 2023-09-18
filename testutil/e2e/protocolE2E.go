@@ -894,6 +894,24 @@ func (lt *lavaTest) checkQoS() error {
 	return nil
 }
 
+func (lt *lavaTest) setTimeoutCommit(ctx context.Context, timeout int) {
+	command := "./scripts/emergency_mode.sh " + strconv.Itoa(timeout)
+	logName := "10_SetTimeoutCommit"
+	funcName := "setTimeoutCommit"
+
+	lt.execCommand(ctx, funcName, logName, command, true)
+	utils.LavaFormatInfo(funcName + " OK")
+}
+
+func (lt *lavaTest) stopLava(ctx context.Context) {
+	command := "./scripts/stop_lava.sh"
+	logName := "11_StopLava"
+	funcName := "stopLava"
+
+	lt.execCommand(ctx, funcName, logName, command, true)
+	utils.LavaFormatInfo(funcName + " OK")
+}
+
 func (lt *lavaTest) checkResponse(tendermintConsumerURL string, restConsumerURL string, grpcConsumerURL string) error {
 	utils.LavaFormatInfo("Starting Relay Response Integrity Tests")
 
@@ -1176,6 +1194,10 @@ func runProtocolE2E(timeout time.Duration) {
 	// TODO: Add payment tests when subscription payment mechanism is implemented
 
 	lt.checkQoS()
+
+	lt.stopLava(ctx)
+
+	lt.setTimeoutCommit(ctx, 10000)
 
 	lt.finishTestSuccessfully()
 }
