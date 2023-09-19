@@ -903,13 +903,14 @@ func (lt *lavaTest) setTimeoutCommit(ctx context.Context, timeout int) {
 	utils.LavaFormatInfo(funcName + " OK")
 }
 
-func (lt *lavaTest) stopLava(ctx context.Context) {
-	command := "./scripts/stop_lava.sh"
-	logName := "11_StopLava"
-	funcName := "stopLava"
+func (lt *lavaTest) stopLava() {
+	cmd := exec.Command("killall", "lavad")
+	err := cmd.Run()
+	if err != nil {
+		panic(err)
+	}
 
-	lt.execCommand(ctx, funcName, logName, command, true)
-	utils.LavaFormatInfo(funcName + " OK")
+	utils.LavaFormatInfo("stopLava" + " OK")
 }
 
 func (lt *lavaTest) checkResponse(tendermintConsumerURL string, restConsumerURL string, grpcConsumerURL string) error {
@@ -1195,7 +1196,7 @@ func runProtocolE2E(timeout time.Duration) {
 
 	lt.checkQoS()
 
-	lt.stopLava(ctx)
+	lt.stopLava()
 
 	lt.setTimeoutCommit(ctx, 10000)
 
