@@ -1094,6 +1094,10 @@ func runProtocolE2E(timeout time.Duration) {
 	utils.LavaFormatInfo("Staking Lava")
 	lt.stakeLava(ctx)
 
+	//lt.stopLava()
+	//go lt.setTimeoutCommit(ctx, 10000)
+	//lt.checkLava(timeout)
+
 	// scripts/init_e2e.sh will:
 	// - produce 4 specs: ETH1, GTH1, IBC, COSMOSSDK, LAV1 (via spec_add_{ethereum,cosmoshub,lava})
 	// - produce 1 plan: "DefaultPlan"
@@ -1169,6 +1173,10 @@ func runProtocolE2E(timeout time.Duration) {
 	})
 	utils.LavaFormatInfo("TENDERMINTRPC URI TEST OK")
 
+	//lt.stopLava()
+	//go lt.setTimeoutCommit(ctx, 1)
+	//lt.checkLava(timeout)
+
 	lt.lavaOverLava(ctx)
 
 	// staked client then with subscription
@@ -1195,10 +1203,6 @@ func runProtocolE2E(timeout time.Duration) {
 	// TODO: Add payment tests when subscription payment mechanism is implemented
 
 	lt.checkQoS()
-
-	lt.stopLava()
-
-	lt.setTimeoutCommit(ctx, 10000)
 
 	lt.finishTestSuccessfully()
 }
