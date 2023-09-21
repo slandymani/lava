@@ -64,7 +64,7 @@ sed $SED_INLINE \
 sed $SED_INLINE -e "s/enable = .*/enable = true/" "$path$app"
 
 # Add users
-users=("alice" "bob" "user1" "user2" "user3" "user4" "servicer1" "servicer2" "servicer3" "servicer4" "servicer5" "servicer6" "servicer7" "servicer8" "servicer9" "servicer10")
+users=("alice" "bob" "user1" "user2" "user3" "user4" "user5" "servicer1" "servicer2" "servicer3" "servicer4" "servicer5" "servicer6" "servicer7" "servicer8" "servicer9" "servicer10")
 
 for user in "${users[@]}"; do
     lavad keys add "$user"

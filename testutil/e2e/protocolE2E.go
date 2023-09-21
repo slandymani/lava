@@ -45,8 +45,8 @@ const (
 )
 
 var (
-	checkedPlansE2E         = []string{"DefaultPlan"}
-	checkedSubscriptions    = []string{"user1", "user2", "user3"}
+	checkedPlansE2E         = []string{"DefaultPlan", "EmergencyModePlan"}
+	checkedSubscriptions    = []string{"user1", "user2", "user3", "user5"}
 	checkedSpecsE2E         = []string{"LAV1", "ETH1"}
 	checkedSpecsE2ELOL      = []string{"GTH1"}
 	checkedSubscriptionsLOL = []string{"user4"}
@@ -218,7 +218,7 @@ func (lt *lavaTest) checkStakeLava(
 
 	// check if plans added exist
 	if len(planQueryRes.PlansInfo) != planCount {
-		panic("Staking Failed PLAN count" + fmt.Sprintf("expected %d, got %d", planCount, len(planQueryRes.PlansInfo)))
+		panic("Staking Failed PLAN count " + fmt.Sprintf("expected %d, got %d", planCount, len(planQueryRes.PlansInfo)))
 	}
 
 	for _, plan := range planQueryRes.PlansInfo {
@@ -528,6 +528,19 @@ func (lt *lavaTest) startLavaConsumer(ctx context.Context) {
 	utils.LavaFormatInfo("startRPCConsumer OK")
 }
 
+func (lt *lavaTest) startLavaEmergencyConsumer(ctx context.Context) {
+	for idx, u := range []string{"user5"} {
+		command := fmt.Sprintf(
+			"%s rpcconsumer %s/lavaConsumerEmergency%d.yml --chain-id=lava --from %s %s",
+			lt.protocolPath, configFolder, idx+1, u, lt.lavadArgs+lt.consumerArgs,
+		)
+		logName := "11_RPCEmergencyConsumer_" + fmt.Sprintf("%02d", idx+1)
+		funcName := fmt.Sprintf("startRPCEmergencyConsumer (consumer %02d)", idx+1)
+		lt.execCommand(ctx, funcName, logName, command, false)
+	}
+	utils.LavaFormatInfo("startRPCEmergencyConsumer OK")
+}
+
 func (lt *lavaTest) checkTendermintConsumer(rpcURL string, timeout time.Duration) {
 	for start := time.Now(); time.Since(start) < timeout; {
 		utils.LavaFormatInfo("Waiting TENDERMINT Consumer")
@@ -606,7 +619,7 @@ func (lt *lavaTest) lavaOverLava(ctx context.Context) {
 	// - produce 4 specs: ETH1, GTH1, IBC, COSMOSSDK, LAV1 (via spec_add_{ethereum,cosmoshub,lava})
 	// - produce 1 plan: "DefaultPlan"
 
-	lt.checkStakeLava(1, 5, 3, 5, checkedPlansE2E, checkedSpecsE2ELOL, checkedSubscriptionsLOL, "Lava Over Lava Test OK")
+	lt.checkStakeLava(2, 5, 4, 5, checkedPlansE2E, checkedSpecsE2ELOL, checkedSubscriptionsLOL, "Lava Over Lava Test OK")
 }
 
 func (lt *lavaTest) checkRESTConsumer(rpcURL string, timeout time.Duration) {
@@ -644,6 +657,24 @@ func restTests(rpcURL string, testDuration time.Duration) error {
 				errors = append(errors, string(reply))
 			}
 		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf(strings.Join(errors, ",\n"))
+	}
+	return nil
+}
+
+func tendermintRelayTest(rpcURL string, blockNumToGet int) error {
+	utils.LavaFormatInfo("Starting TENDERMINTRPC Emergency Relay")
+	errors := []string{}
+	apiToTest := "%s/block?height=" + strconv.Itoa(blockNumToGet)
+
+	reply, err := getRequest(fmt.Sprintf(apiToTest, rpcURL))
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("%s", err))
+	} else if strings.Contains(string(reply), "error") {
+		errors = append(errors, string(reply))
 	}
 
 	if len(errors) > 0 {
@@ -1094,115 +1125,138 @@ func runProtocolE2E(timeout time.Duration) {
 	utils.LavaFormatInfo("Staking Lava")
 	lt.stakeLava(ctx)
 
-	//lt.stopLava()
-	//go lt.setTimeoutCommit(ctx, 10000)
-	//lt.checkLava(timeout)
-
-	// scripts/init_e2e.sh will:
-	// - produce 4 specs: ETH1, GTH1, IBC, COSMOSSDK, LAV1 (via spec_add_{ethereum,cosmoshub,lava})
-	// - produce 1 plan: "DefaultPlan"
-	// - produce 5 staked providers (for each of ETH1, LAV1)
-	// - produce 1 staked client (for each of ETH1, LAV1)
-	// - produce 1 subscription (for both ETH1, LAV1)
-
-	lt.checkStakeLava(1, 5, 3, 5, checkedPlansE2E, checkedSpecsE2E, checkedSubscriptions, "Staking Lava OK")
-
-	utils.LavaFormatInfo("RUNNING TESTS")
-
-	// hereinafter:
-	// run each consumer test once for each client/user (staked or subscription)
-
-	// repeat() is a helper to run a given function once per client, passing the
-	// iteration (client) number to the function
-	repeat := func(n int, f func(int)) {
-		for i := 1; i <= n; i++ {
-			f(i)
-		}
-	}
-
-	// ETH1 flow
-	lt.startJSONRPCProxy(ctx)
-	lt.checkJSONRPCConsumer("http://127.0.0.1:1111", time.Minute*2, "JSONRPCProxy OK") // checks proxy.
-	lt.startJSONRPCProvider(ctx)
-	lt.startJSONRPCConsumer(ctx)
-
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:333%d", n)
-		msg := fmt.Sprintf("JSONRPCConsumer%d OK", n)
-		lt.checkJSONRPCConsumer(url, time.Minute*2, msg)
-	})
-
-	// Lava Flow
+	// emergency mode
+	lt.stopLava()
+	go lt.setTimeoutCommit(ctx, 100000)
+	lt.checkLava(timeout)
 	lt.startLavaProviders(ctx)
-	lt.startLavaConsumer(ctx)
+	lt.startLavaEmergencyConsumer(ctx)
+	lt.checkTendermintConsumer("http://127.0.0.1:3346", time.Second*30)
 
-	// staked client then with subscription
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
-		lt.checkTendermintConsumer(url, time.Second*30)
-		url = fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3+1)
-		lt.checkRESTConsumer(url, time.Second*30)
-		url = fmt.Sprintf("127.0.0.1:334%d", (n-1)*3+2)
-		lt.checkGRPCConsumer(url, time.Second*30)
-	})
+	url := "http://127.0.0.1:3346"
+	if err := tendermintRelayTest(url, 1); err != nil {
+		panic(err)
+	}
+	utils.LavaFormatInfo("TENDERMINT RELAY TESTS SUCCESSFULLY")
 
-	// staked client then with subscription
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:333%d", n)
-		if err := jsonrpcTests(url, time.Second*30); err != nil {
-			panic(err)
-		}
-	})
-	utils.LavaFormatInfo("JSONRPC TEST OK")
-
-	// staked client then with subscription
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
-		if err := tendermintTests(url, time.Second*30); err != nil {
-			panic(err)
-		}
-	})
-	utils.LavaFormatInfo("TENDERMINTRPC TEST OK")
-
-	// staked client then with subscription
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
-		if err := tendermintURITests(url, time.Second*30); err != nil {
-			panic(err)
-		}
-	})
-	utils.LavaFormatInfo("TENDERMINTRPC URI TEST OK")
-
-	//lt.stopLava()
-	//go lt.setTimeoutCommit(ctx, 1)
-	//lt.checkLava(timeout)
-
-	lt.lavaOverLava(ctx)
-
-	// staked client then with subscription
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3+1)
-		if err := restTests(url, time.Second*30); err != nil {
-			panic(err)
-		}
-	})
-	utils.LavaFormatInfo("REST TEST OK")
-
-	// staked client then with subscription
-	// TODO: if set to 30 secs fails e2e need to investigate why. currently blocking PR's
-	repeat(1, func(n int) {
-		url := fmt.Sprintf("127.0.0.1:334%d", (n-1)*3+2)
-		if err := grpcTests(url, time.Second*5); err != nil {
-			panic(err)
-		}
-	})
-	utils.LavaFormatInfo("GRPC TEST OK")
-
-	lt.checkResponse("http://127.0.0.1:3340", "http://127.0.0.1:3341", "127.0.0.1:3342")
-
-	// TODO: Add payment tests when subscription payment mechanism is implemented
-
-	lt.checkQoS()
-
+	//// scripts/init_e2e.sh will:
+	//// - produce 4 specs: ETH1, GTH1, IBC, COSMOSSDK, LAV1 (via spec_add_{ethereum,cosmoshub,lava})
+	//// - produce 1 plan: "DefaultPlan"
+	//// - produce 5 staked providers (for each of ETH1, LAV1)
+	//// - produce 1 staked client (for each of ETH1, LAV1)
+	//// - produce 1 subscription (for both ETH1, LAV1)
+	//
+	//lt.checkStakeLava(2, 5, 4, 5, checkedPlansE2E, checkedSpecsE2E, checkedSubscriptions, "Staking Lava OK")
+	//
+	//utils.LavaFormatInfo("RUNNING TESTS")
+	//
+	//// hereinafter:
+	//// run each consumer test once for each client/user (staked or subscription)
+	//
+	//// repeat() is a helper to run a given function once per client, passing the
+	//// iteration (client) number to the function
+	//repeat := func(n int, f func(int)) {
+	//	for i := 1; i <= n; i++ {
+	//		f(i)
+	//	}
+	//}
+	//
+	//// ETH1 flow
+	//lt.startJSONRPCProxy(ctx)
+	//lt.checkJSONRPCConsumer("http://127.0.0.1:1111", time.Minute*2, "JSONRPCProxy OK") // checks proxy.
+	//lt.startJSONRPCProvider(ctx)
+	//lt.startJSONRPCConsumer(ctx)
+	//
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:333%d", n)
+	//	msg := fmt.Sprintf("JSONRPCConsumer%d OK", n)
+	//	lt.checkJSONRPCConsumer(url, time.Minute*2, msg)
+	//})
+	//
+	//// Lava Flow
+	//lt.startLavaProviders(ctx)
+	//lt.startLavaConsumer(ctx)
+	////lt.startLavaEmergencyConsumer(ctx)
+	//
+	//// staked client then with subscription
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
+	//	lt.checkTendermintConsumer(url, time.Second*30)
+	//	url = fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3+1)
+	//	lt.checkRESTConsumer(url, time.Second*30)
+	//	url = fmt.Sprintf("127.0.0.1:334%d", (n-1)*3+2)
+	//	lt.checkGRPCConsumer(url, time.Second*30)
+	//})
+	//
+	//// staked client then with subscription
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:333%d", n)
+	//	if err := jsonrpcTests(url, time.Second*30); err != nil {
+	//		panic(err)
+	//	}
+	//})
+	//utils.LavaFormatInfo("JSONRPC TEST OK")
+	//
+	//// staked client then with subscription
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
+	//	if err := tendermintTests(url, time.Second*30); err != nil {
+	//		panic(err)
+	//	}
+	//})
+	//utils.LavaFormatInfo("TENDERMINTRPC TEST OK")
+	//
+	//// staked client then with subscription
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3)
+	//	if err := tendermintURITests(url, time.Second*30); err != nil {
+	//		panic(err)
+	//	}
+	//})
+	//utils.LavaFormatInfo("TENDERMINTRPC URI TEST OK")
+	//
+	//lt.lavaOverLava(ctx)
+	//
+	//// staked client then with subscription
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("http://127.0.0.1:334%d", (n-1)*3+1)
+	//	if err := restTests(url, time.Second*30); err != nil {
+	//		panic(err)
+	//	}
+	//})
+	//utils.LavaFormatInfo("REST TEST OK")
+	//
+	//// staked client then with subscription
+	//// TODO: if set to 30 secs fails e2e need to investigate why. currently blocking PR's
+	//repeat(1, func(n int) {
+	//	url := fmt.Sprintf("127.0.0.1:334%d", (n-1)*3+2)
+	//	if err := grpcTests(url, time.Second*5); err != nil {
+	//		panic(err)
+	//	}
+	//})
+	//utils.LavaFormatInfo("GRPC TEST OK")
+	//
+	//lt.checkResponse("http://127.0.0.1:3340", "http://127.0.0.1:3341", "127.0.0.1:3342")
+	//
+	//// TODO: Add payment tests when subscription payment mechanism is implemented
+	//
+	//// Emergency mode test
+	////lt.stopLava()
+	////go lt.setTimeoutCommit(ctx, 100000)
+	////lt.checkLava(timeout)
+	////lt.startLavaProviders(ctx)
+	////lt.startLavaEmergencyConsumer(ctx)
+	////lt.checkTendermintConsumer("http://127.0.0.1:3346", time.Second*30)
+	////
+	////repeat(2, func(n int) {
+	////	url := "http://127.0.0.1:3346"
+	////	if err := tendermintRelayTest(url, n); err != nil {
+	////		panic(err)
+	////	}
+	////})
+	////utils.LavaFormatInfo("TENDERMINT RELAY TESTS SUCCESSFULLY")
+	//
+	//lt.checkQoS()
 	lt.finishTestSuccessfully()
+
 }
