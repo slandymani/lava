@@ -925,13 +925,26 @@ func (lt *lavaTest) checkQoS() error {
 	return nil
 }
 
-func (lt *lavaTest) setTimeoutCommit(ctx context.Context, timeout int) {
-	command := "./scripts/emergency_mode.sh " + strconv.Itoa(timeout)
-	logName := "10_SetTimeoutCommit"
-	funcName := "setTimeoutCommit"
+func (lt *lavaTest) startLavaInEmergencyMode(ctx context.Context, timeoutCommit int) {
+	command := "./scripts/emergency_mode.sh " + strconv.Itoa(timeoutCommit)
+	logName := "10_StartLavaInEmergencyMode"
+	funcName := "startLavaInEmergencyMode"
 
 	lt.execCommand(ctx, funcName, logName, command, true)
 	utils.LavaFormatInfo(funcName + " OK")
+}
+
+func (lt *lavaTest) sleepUntilNextEpoch() {
+	// TODO change to execute all useful_commands?
+
+	cmd := exec.Command("/bin/bash", "-c", "source ./scripts/useful_commands.sh && sleep_until_next_epoch")
+
+	err := cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	utils.LavaFormatInfo("sleepUntilNextEpoch" + " OK")
 }
 
 func (lt *lavaTest) stopLava() {
@@ -1113,6 +1126,14 @@ func runProtocolE2E(timeout time.Duration) {
 		}
 	}()
 
+	// repeat() is a helper to run a given function once per client, passing the
+	// iteration (client) number to the function
+	repeat := func(n int, f func(int)) {
+		for i := 1; i <= n; i++ {
+			f(i)
+		}
+	}
+
 	utils.LavaFormatInfo("Starting Lava")
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1124,20 +1145,78 @@ func runProtocolE2E(timeout time.Duration) {
 
 	utils.LavaFormatInfo("Staking Lava")
 	lt.stakeLava(ctx)
+	//lt.startLavaProviders(ctx)
 
 	// emergency mode
+	utils.LavaFormatInfo("Sleeping Until New Epoch")
+	lt.sleepUntilNextEpoch()
 	lt.stopLava()
-	go lt.setTimeoutCommit(ctx, 100000)
+	go lt.startLavaInEmergencyMode(ctx, 100000)
 	lt.checkLava(timeout)
+	utils.LavaFormatInfo("Starting Lava OK")
+
+	signalChannel := make(chan bool)
+
+	go func() {
+		epochCounter := 1
+		for {
+			time.Sleep(time.Second * 20)
+			utils.LavaFormatInfo(fmt.Sprintf("%d : VIRTUAL EPOCH ENDED", epochCounter))
+			epochCounter++
+			signalChannel <- true
+		}
+	}()
+
 	lt.startLavaProviders(ctx)
 	lt.startLavaEmergencyConsumer(ctx)
 	lt.checkTendermintConsumer("http://127.0.0.1:3346", time.Second*30)
 
+	utils.LavaFormatInfo("Sleeping Until New Virtual Epoch")
+	<-signalChannel
+
 	url := "http://127.0.0.1:3346"
-	if err := tendermintRelayTest(url, 1); err != nil {
-		panic(err)
-	}
+	repeat(82, func(n int) {
+		if err := tendermintRelayTest(url, n); err != nil {
+			utils.LavaFormatError("Error while sending relay: ", err)
+		}
+	})
 	utils.LavaFormatInfo("TENDERMINT RELAY TESTS SUCCESSFULLY")
+
+	utils.LavaFormatInfo("Trying to exceed the maximum number of compute units")
+
+	err = tendermintRelayTest(url, 1)
+	if err != nil {
+		utils.LavaFormatError("Can't send relay: ", err)
+	} else {
+		utils.LavaFormatInfo("Relay successful")
+	}
+
+	//utils.LavaFormatInfo("Waiting new virtual epoch (i don't now how to check it")
+	//
+	//for i := 1; i <= 51; i++ {
+	//	if err := tendermintRelayTest(url, i); err != nil {
+	//		utils.LavaFormatError("Error while sending relay: ", err)
+	//	}
+	//}
+	//utils.LavaFormatInfo("TENDERMINT RELAY TESTS SUCCESSFULLY")
+	//
+	//utils.LavaFormatInfo("Trying to exceed the maximum number of compute units")
+	//
+	//err = tendermintRelayTest(url, 1)
+	//if err != nil {
+	//	utils.LavaFormatError("Can't send relay: ", err)
+	//} else {
+	//	utils.LavaFormatInfo("Relay successful")
+	//}
+	//
+	//utils.LavaFormatInfo("Turning off emergency mode")
+	//
+	//lt.stopLava()
+	//go lt.startLavaInEmergencyMode(ctx, 1)
+	//lt.checkLava(timeout)
+	//utils.LavaFormatInfo("Starting Lava OK")
+
+	// TODO check payments after emergency mode
 
 	//// scripts/init_e2e.sh will:
 	//// - produce 4 specs: ETH1, GTH1, IBC, COSMOSSDK, LAV1 (via spec_add_{ethereum,cosmoshub,lava})
@@ -1242,7 +1321,7 @@ func runProtocolE2E(timeout time.Duration) {
 	//
 	//// Emergency mode test
 	////lt.stopLava()
-	////go lt.setTimeoutCommit(ctx, 100000)
+	////go lt.startLavaInEmergencyMode(ctx, 100000)
 	////lt.checkLava(timeout)
 	////lt.startLavaProviders(ctx)
 	////lt.startLavaEmergencyConsumer(ctx)
@@ -1258,5 +1337,4 @@ func runProtocolE2E(timeout time.Duration) {
 	//
 	//lt.checkQoS()
 	lt.finishTestSuccessfully()
-
 }
