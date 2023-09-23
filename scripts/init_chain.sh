@@ -24,7 +24,7 @@ app='app.toml'
 # Edit genesis file
 data=$(cat "$path$genesis" \
     | jq '.app_state.downtime.params.downtime_duration = "10s"' \
-    | jq '.app_state.downtime.params.epoch_duration = "20s"' \
+    | jq '.app_state.downtime.params.epoch_duration = "30s"' \
     | jq '.app_state.gov.params.min_deposit[0].denom = "ulava"' \
     | jq '.app_state.gov.params.min_deposit[0].amount = "100"' \
     | jq '.app_state.gov.params.voting_period = "3s"' \

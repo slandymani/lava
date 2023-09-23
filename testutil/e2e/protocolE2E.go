@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"go/build"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"os"
@@ -683,6 +684,24 @@ func tendermintRelayTest(rpcURL string, blockNumToGet int) error {
 	return nil
 }
 
+func restRelayTest(rpcURL string, blockNumToGet int) error {
+	utils.LavaFormatInfo("Starting REST Emergency Relay")
+	errors := []string{}
+	apiToTest := "%s/blocks/" + strconv.Itoa(blockNumToGet)
+
+	reply, err := getRequest(fmt.Sprintf(apiToTest, rpcURL))
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("%s", err))
+	} else if strings.Contains(string(reply), "error") {
+		errors = append(errors, string(reply))
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf(strings.Join(errors, ",\n"))
+	}
+	return nil
+}
+
 func getRequest(url string) ([]byte, error) {
 	res, err := http.Get(url)
 	if err != nil {
@@ -957,6 +976,32 @@ func (lt *lavaTest) stopLava() {
 	utils.LavaFormatInfo("stopLava" + " OK")
 }
 
+func (lt *lavaTest) getLatestBlockTime() time.Time {
+	cmd := exec.Command("lavad", "status")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Println(err)
+	}
+
+	jsonString := strings.TrimSpace(string(output))
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonString), &data); err != nil {
+		panic(err)
+	}
+
+	latestBlockRawTime := data["SyncInfo"].(map[string]interface{})["latest_block_time"].(string)
+
+	latestBlockTime, err := time.Parse("2006-01-02T15:04:05Z", latestBlockRawTime)
+	if err != nil {
+		panic(err)
+	}
+
+	utils.LavaFormatInfo("getLastBlockTime" + " OK")
+
+	return latestBlockTime
+}
+
 func (lt *lavaTest) checkResponse(tendermintConsumerURL string, restConsumerURL string, grpcConsumerURL string) error {
 	utils.LavaFormatInfo("Starting Relay Response Integrity Tests")
 
@@ -1126,6 +1171,11 @@ func runProtocolE2E(timeout time.Duration) {
 		}
 	}()
 
+	utils.LavaFormatInfo("Starting Lava")
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	// repeat() is a helper to run a given function once per client, passing the
 	// iteration (client) number to the function
 	repeat := func(n int, f func(int)) {
@@ -1134,62 +1184,73 @@ func runProtocolE2E(timeout time.Duration) {
 		}
 	}
 
-	utils.LavaFormatInfo("Starting Lava")
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
 	go lt.startLava(ctx)
 	lt.checkLava(timeout)
 	utils.LavaFormatInfo("Starting Lava OK")
 
 	utils.LavaFormatInfo("Staking Lava")
 	lt.stakeLava(ctx)
+
 	//lt.startLavaProviders(ctx)
+	//lt.startLavaEmergencyConsumer(ctx)
+	//lt.checkRESTConsumer("http://127.0.0.1:3347", time.Second*30)
 
 	// emergency mode
 	utils.LavaFormatInfo("Sleeping Until New Epoch")
 	lt.sleepUntilNextEpoch()
+
 	lt.stopLava()
 	go lt.startLavaInEmergencyMode(ctx, 100000)
+
 	lt.checkLava(timeout)
 	utils.LavaFormatInfo("Starting Lava OK")
 
+	lt.startLavaProviders(ctx)
+	lt.startLavaEmergencyConsumer(ctx)
+	lt.checkRESTConsumer("http://127.0.0.1:3347", time.Second*30)
+
 	signalChannel := make(chan bool)
 
+	latestBlockTime := lt.getLatestBlockTime()
+	log.Println(lt.getLatestBlockTime())
+
 	go func() {
-		epochCounter := 1
+		epochCounter := (time.Now().Unix() - latestBlockTime.Unix()) / 60
+
 		for {
-			time.Sleep(time.Second * 20)
+			time.Sleep(time.Until(latestBlockTime.Add(time.Second * 60 * time.Duration(epochCounter+1))))
 			utils.LavaFormatInfo(fmt.Sprintf("%d : VIRTUAL EPOCH ENDED", epochCounter))
 			epochCounter++
 			signalChannel <- true
 		}
 	}()
 
-	lt.startLavaProviders(ctx)
-	lt.startLavaEmergencyConsumer(ctx)
-	lt.checkTendermintConsumer("http://127.0.0.1:3346", time.Second*30)
+	var relayNum int
+	url := "http://127.0.0.1:3347"
 
-	utils.LavaFormatInfo("Sleeping Until New Virtual Epoch")
-	<-signalChannel
+	repeat(5, func(m int) {
+		utils.LavaFormatInfo("Sleeping Until New Virtual Epoch")
+		<-signalChannel
 
-	url := "http://127.0.0.1:3346"
-	repeat(82, func(n int) {
-		if err := tendermintRelayTest(url, n); err != nil {
-			utils.LavaFormatError("Error while sending relay: ", err)
+		relayNum = 1
+		for {
+			if err := restRelayTest(url, relayNum); err != nil {
+				utils.LavaFormatError(fmt.Sprintf("Error while sending relay number %d: ", relayNum), err)
+				break
+			}
+			relayNum++
 		}
+		utils.LavaFormatInfo("REST RELAY TESTS FINISHED")
 	})
-	utils.LavaFormatInfo("TENDERMINT RELAY TESTS SUCCESSFULLY")
 
-	utils.LavaFormatInfo("Trying to exceed the maximum number of compute units")
-
-	err = tendermintRelayTest(url, 1)
-	if err != nil {
-		utils.LavaFormatError("Can't send relay: ", err)
-	} else {
-		utils.LavaFormatInfo("Relay successful")
-	}
+	//utils.LavaFormatInfo("Trying to exceed the maximum number of compute units")
+	//
+	//err = restRelayTest(url, 1)
+	//if err != nil {
+	//	utils.LavaFormatError("Can't send relay: ", err)
+	//} else {
+	//	utils.LavaFormatInfo("Relay successful")
+	//}
 
 	//utils.LavaFormatInfo("Waiting new virtual epoch (i don't now how to check it")
 	//
