@@ -1316,12 +1316,12 @@ func runProtocolE2E(timeout time.Duration) {
 		}
 	}()
 
-	utils.LavaFormatInfo("Waiting for finishing this epoch and waiting for 2 more epochs")
+	utils.LavaFormatInfo("Waiting for finishing current epoch and waiting for 2 more virtual epochs")
 
 	// We should have approximately (numOfProviders * epoch_cu_limit * 3) CU
-	<-signalChannel
-	<-signalChannel
-	<-signalChannel
+	repeat(3, func(m int) {
+		<-signalChannel
+	})
 
 	repeat(75, func(m int) {
 		if err := restRelayTest(url, m); err != nil {
