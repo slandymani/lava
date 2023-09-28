@@ -666,28 +666,9 @@ func restTests(rpcURL string, testDuration time.Duration) error {
 	return nil
 }
 
-func tendermintRelayTest(rpcURL string, blockNumToGet int) error {
-	utils.LavaFormatInfo("Starting TENDERMINTRPC Emergency Relay")
+func restRelayTest(rpcURL string) error {
 	errors := []string{}
-	apiToTest := "%s/block?height=" + strconv.Itoa(blockNumToGet)
-
-	reply, err := getRequest(fmt.Sprintf(apiToTest, rpcURL))
-	if err != nil {
-		errors = append(errors, fmt.Sprintf("%s", err))
-	} else if strings.Contains(string(reply), "error") {
-		errors = append(errors, string(reply))
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, ",\n"))
-	}
-	return nil
-}
-
-func restRelayTest(rpcURL string, blockNumToGet int) error {
-	utils.LavaFormatInfo("Starting REST Emergency Relay")
-	errors := []string{}
-	apiToTest := "%s/blocks/" + strconv.Itoa(blockNumToGet)
+	apiToTest := "%s/blocks/1"
 
 	reply, err := getRequest(fmt.Sprintf(apiToTest, rpcURL))
 	if err != nil {
@@ -1289,13 +1270,16 @@ func runProtocolE2E(timeout time.Duration) {
 	utils.LavaFormatInfo("Sleeping Until New Epoch")
 	lt.sleepUntilNextEpoch()
 
-	utils.LavaFormatInfo("Starting emergency mode")
+	utils.LavaFormatInfo("Restarting lava to emergency mode")
 
 	lt.stopLava()
 	go lt.startLavaInEmergencyMode(ctx, 100000)
 
 	lt.checkLava(timeout)
 	utils.LavaFormatInfo("Starting Lava OK")
+
+	// set in init_chain.sh
+	var epochDuration int64 = 30
 
 	signalChannel := make(chan bool)
 	url := "http://127.0.0.1:3347"
@@ -1306,11 +1290,12 @@ func runProtocolE2E(timeout time.Duration) {
 	latestBlockTime := lt.getLatestBlockTime()
 
 	go func() {
-		epochCounter := (time.Now().Unix() - latestBlockTime.Unix()) / 30
+		epochCounter := (time.Now().Unix() - latestBlockTime.Unix()) / epochDuration
 
 		for {
-			time.Sleep(time.Until(latestBlockTime.Add(time.Second * 30 * time.Duration(epochCounter+1))))
+			time.Sleep(time.Until(latestBlockTime.Add(time.Second * time.Duration(epochDuration*(epochCounter+1)))))
 			utils.LavaFormatInfo(fmt.Sprintf("%d : VIRTUAL EPOCH ENDED", epochCounter))
+
 			epochCounter++
 			signalChannel <- true
 		}
@@ -1318,13 +1303,13 @@ func runProtocolE2E(timeout time.Duration) {
 
 	utils.LavaFormatInfo("Waiting for finishing current epoch and waiting for 2 more virtual epochs")
 
-	// We should have approximately (numOfProviders * epoch_cu_limit * 3) CU
+	// we should have approximately (numOfProviders * epoch_cu_limit * 3) CU
 	repeat(3, func(m int) {
 		<-signalChannel
 	})
 
 	repeat(75, func(m int) {
-		if err := restRelayTest(url, m); err != nil {
+		if err := restRelayTest(url); err != nil {
 			utils.LavaFormatError(fmt.Sprintf("Error while sending relay number %d: ", m), err)
 			panic(err)
 		}
